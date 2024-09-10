@@ -19,12 +19,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
+#include "usart.h"
 #include "gpio.h"
-#include "lsm6dsox_reg.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lsm6dsox_reg.h"
+#include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,19 +57,16 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint8_t TX_Buffer [] = "A";
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void lsm6dsox_self_test(void);
-
 /* USER CODE BEGIN PFP */
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len);
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len);
-//static void tx_com( uint8_t *tx_buffer, uint16_t len );TODO: This needs to be implimented later
+static void tx_com(uint8_t *tx_buffer, uint16_t len);
 static void platform_delay(uint32_t ms);
-static void platform_init(void);
+void lsm6dsox_self_test(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -105,6 +104,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   //HAL_Delay(100);
   lsm6dsox_self_test();//Sensor Test 
@@ -114,9 +114,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	    /* USER CODE END WHILE */
-	  HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);
-	  HAL_Delay(3000);
+    HAL_Delay(1000);
+    HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);
+    //HAL_Delay(3000);
+    /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -271,7 +273,6 @@ void lsm6dsox_self_test(void)
   lsm6dsox_acceleration_raw_get(&dev_ctx, data_raw);
   /* Read 5 sample and get the average vale for each axis */
   memset(val_st_on, 0x00, 3 * sizeof(float));
-
   for (i = 0; i < 5; i++) {
     /* Check if new value available */
     do {
@@ -446,6 +447,18 @@ static void platform_delay(uint32_t ms)
 {
   HAL_Delay(ms);
 }
+
+/**
+ * @brief Transmit over serial (UART)
+ *
+ * @param tx_buffer
+ * @param len
+ */
+static void tx_com(uint8_t *tx_buffer, uint16_t len)
+{
+  HAL_UART_Transmit(&huart2, tx_buffer, len, 1000);
+}
+
 
 /* USER CODE END 4 */
 
