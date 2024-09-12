@@ -57,6 +57,10 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static int16_t data_raw_acceleration[3];
+static float acceleration_mg[3];
+static uint8_t whoamI, rst;
+static uint8_t tx_buffer[1000];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,6 +71,7 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
 static void tx_com(uint8_t *tx_buffer, uint16_t len);
 static void platform_delay(uint32_t ms);
 void lsm6dsox_self_test(void);
+void lsm6dsox_read_data_polling(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -108,6 +113,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   //HAL_Delay(100);
   lsm6dsox_self_test();//Sensor Test 
+  lsm6dsox_read_data_polling();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -404,6 +410,72 @@ void lsm6dsox_self_test(void)
   }
 
   tx_com(tx_buffer, strlen((char const *)tx_buffer));
+}
+
+/**
+ * @brief  Read accelerometer data from lsm6dsox in Polling mode
+ * 
+ */
+void lsm6dsox_read_data_polling(void)
+{
+  stmdev_ctx_t dev_ctx;
+  /* Initialize mems driver interface */
+  dev_ctx.write_reg = platform_write;
+  dev_ctx.read_reg = platform_read;
+  dev_ctx.mdelay = platform_delay;
+  dev_ctx.handle = &hi2c1;
+  /* Wait sensor boot time */
+  platform_delay(BOOT_TIME);
+  /* Check device ID */
+  lsm6dsox_device_id_get(&dev_ctx, &whoamI);
+
+  if (whoamI != LSM6DSOX_ID)
+    while (1);
+
+  /* Restore default configuration */
+  lsm6dsox_reset_set(&dev_ctx, PROPERTY_ENABLE);
+
+  do {
+    lsm6dsox_reset_get(&dev_ctx, &rst);
+  } while (rst);
+
+  /* Disable I3C interface */
+  lsm6dsox_i3c_disable_set(&dev_ctx, LSM6DSOX_I3C_DISABLE);
+  //TODO :Disable the gyro here too
+  /* Enable Block Data Update */
+  lsm6dsox_block_data_update_set(&dev_ctx, PROPERTY_ENABLE);
+  /* Set Output Data Rate */
+  lsm6dsox_xl_data_rate_set(&dev_ctx, LSM6DSOX_XL_ODR_12Hz5);
+  /* Set full scale */
+  lsm6dsox_xl_full_scale_set(&dev_ctx, LSM6DSOX_2g);
+  /* Configure filtering chain(No aux interface)
+   * Accelerometer - LPF1 + LPF2 path
+   */
+  lsm6dsox_xl_hp_path_on_out_set(&dev_ctx, LSM6DSOX_LP_ODR_DIV_100);
+  lsm6dsox_xl_filter_lp2_set(&dev_ctx, PROPERTY_ENABLE);
+
+  /* Read samples in polling mode (no int) */
+  while (1) {
+    uint8_t reg;
+    /* Read output only if new xl value is available */
+    lsm6dsox_xl_flag_data_ready_get(&dev_ctx, &reg);
+
+    if (reg) {
+      /* Read acceleration field data */
+      memset(data_raw_acceleration, 0x00, 3 * sizeof(int16_t));
+      lsm6dsox_acceleration_raw_get(&dev_ctx, data_raw_acceleration);
+      acceleration_mg[0] =
+        lsm6dsox_from_fs2_to_mg(data_raw_acceleration[0]);
+      acceleration_mg[1] =
+        lsm6dsox_from_fs2_to_mg(data_raw_acceleration[1]);
+      acceleration_mg[2] =
+        lsm6dsox_from_fs2_to_mg(data_raw_acceleration[2]);
+      sprintf((char *)tx_buffer,
+              "Acceleration [mg]:%4.2f\t%4.2f\t%4.2f\r\n",
+              acceleration_mg[0], acceleration_mg[1], acceleration_mg[2]);
+      tx_com(tx_buffer, strlen((char const *)tx_buffer));
+    }
+  }
 }
 
 /*
