@@ -72,6 +72,7 @@ static void tx_com(uint8_t *tx_buffer, uint16_t len);
 static void platform_delay(uint32_t ms);
 void lsm6dsox_self_test(void);
 void lsm6dsox_read_data_polling(void);
+void lsm6dsox_orientation(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -112,8 +113,9 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   //HAL_Delay(100);
-  lsm6dsox_self_test();//Sensor Test 
-  lsm6dsox_read_data_polling();
+  //lsm6dsox_self_test();//Sensor Test 
+  //lsm6dsox_read_data_polling();
+  lsm6dsox_orientation();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -473,6 +475,102 @@ void lsm6dsox_read_data_polling(void)
       sprintf((char *)tx_buffer,
               "Acceleration [mg]:%4.2f\t%4.2f\t%4.2f\r\n",
               acceleration_mg[0], acceleration_mg[1], acceleration_mg[2]);
+      tx_com(tx_buffer, strlen((char const *)tx_buffer));
+    }
+  }
+}
+
+/**
+ * @brief Get orientation using Interrupt 2 
+ * 
+ */
+void lsm6dsox_orientation(void)
+{
+  stmdev_ctx_t dev_ctx;
+  /* Uncomment to configure INT 1 */
+  //lsm6dsox_pin_int1_route_t int1_route;
+  lsm6dsox_pin_int2_route_t int2_route;
+  /* Initialize mems driver interface. */
+  dev_ctx.write_reg = platform_write;
+  dev_ctx.read_reg = platform_read;
+  dev_ctx.mdelay = platform_delay;
+  dev_ctx.handle = &hi2c1;
+  /* Wait sensor boot time */
+  platform_delay(BOOT_TIME);
+  /* Check device ID. */
+  lsm6dsox_device_id_get(&dev_ctx, &whoamI);
+
+  if (whoamI != LSM6DSOX_ID)
+    while (1);
+
+  /* Restore default configuration. */
+  lsm6dsox_reset_set(&dev_ctx, PROPERTY_ENABLE);
+
+  do {
+    lsm6dsox_reset_get(&dev_ctx, &rst);
+  } while (rst);
+
+  /* Disable I3C interface. */
+  lsm6dsox_i3c_disable_set(&dev_ctx, LSM6DSOX_I3C_DISABLE);
+  /* Set XL Output Data Rate to 417 Hz. */
+  lsm6dsox_xl_data_rate_set(&dev_ctx, LSM6DSOX_XL_ODR_417Hz);
+  /* Set 2g full XL scale.*/
+  lsm6dsox_xl_full_scale_set(&dev_ctx, LSM6DSOX_2g);
+  /* Set threshold to 60 degrees. */
+  lsm6dsox_6d_threshold_set(&dev_ctx, LSM6DSOX_DEG_60);
+  /* LPF2 on 6D/4D function selection. */
+  lsm6dsox_xl_lp2_on_6d_set(&dev_ctx, PROPERTY_ENABLE);
+  /*
+   * To enable 4D mode uncomment next line.
+   * 4D orientation detection disable Z-axis events.
+   */
+  //lsm6dsox_4d_mode_set(&dev_ctx, PROPERTY_ENABLE);
+  /*
+   * Uncomment if interrupt generation on Free Fall INT1 pin
+   */
+  //lsm6dsox_pin_int1_route_get(&dev_ctx, &int1_route);
+  //int1_route.reg.md1_cfg.int1_ff = PROPERTY_ENABLE;
+  //lsm6dsox_pin_int1_route_set(&dev_ctx, &int1_route);
+
+  /* Uncomment if interrupt generation on Free Fall INT2 pin */
+  lsm6dsox_pin_int2_route_get(&dev_ctx, NULL, &int2_route);
+  int2_route.free_fall = PROPERTY_ENABLE;
+  lsm6dsox_pin_int2_route_set(&dev_ctx, NULL, int2_route);
+
+  /* Wait Events. */
+  while (1) {
+    lsm6dsox_all_sources_t all_source;
+    /* Check if 6D/4D Orientation events. */
+    lsm6dsox_all_sources_get(&dev_ctx, &all_source);
+
+    if (all_source.six_d) {
+      sprintf((char *)tx_buffer, "6D Or. switched to ");
+
+/*       if (all_source.six_d_xh) {
+        strcat((char *)tx_buffer, "XH");
+      }
+
+      if (all_source.six_d_xl) {
+        strcat((char *)tx_buffer, "XL");
+      }
+
+      if (all_source.six_d_yh) {
+        strcat((char *)tx_buffer, "YH");
+      }
+
+      if (all_source.six_d_yl) {
+        strcat((char *)tx_buffer, "YL");
+      } */
+
+      if (all_source.six_d_zh) {
+        strcat((char *)tx_buffer, "ZH");
+      }
+
+      if (all_source.six_d_zl) {
+        strcat((char *)tx_buffer, "ZL");
+      }
+
+      strcat((char *)tx_buffer, "\r\n");
       tx_com(tx_buffer, strlen((char const *)tx_buffer));
     }
   }
