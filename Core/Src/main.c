@@ -61,6 +61,9 @@ static int16_t data_raw_acceleration[3];
 static float acceleration_mg[3];
 static uint8_t whoamI, rst;
 static uint8_t tx_buffer[1000];
+
+lsm6dsox_all_sources_t all_source;
+stmdev_ctx_t dev_ctx;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -73,6 +76,7 @@ static void platform_delay(uint32_t ms);
 void lsm6dsox_self_test(void);
 void lsm6dsox_read_data_polling(void);
 void lsm6dsox_orientation(void);
+void lsm6dsox_setup();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -115,15 +119,17 @@ int main(void)
   //HAL_Delay(100);
   //lsm6dsox_self_test();//Sensor Test 
   //lsm6dsox_read_data_polling();
-  lsm6dsox_orientation();
+  //lsm6dsox_orientation();
+  lsm6dsox_setup();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_Delay(1000);
-    HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);
+    HAL_Delay(200);
+    //HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//LED
+    HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_8);//External LED
     //HAL_Delay(3000);
     /* USER CODE END WHILE */
 
@@ -183,6 +189,32 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+ * @brief  ISR for INT2 from LMSD6DSOX
+ * 
+ * @param GPIO_Pin Pin that will be checked upon entering the ISR
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == LSM6DSOX_INT2_Pin)
+  {
+    /* Check if 6D/4D Orientation events. */
+    lsm6dsox_all_sources_get(&dev_ctx, &all_source);
+
+    //Check the Up or Down orientation 
+    if (all_source.six_d_zh) {
+      sprintf((char *)tx_buffer, "ZH\r\n");
+      tx_com(tx_buffer, strlen((char const *)tx_buffer));
+    }
+
+    if (all_source.six_d_zl) {
+      sprintf((char *)tx_buffer, "ZL\r\n");
+      tx_com(tx_buffer, strlen((char const *)tx_buffer));
+    }
+  }
+}
+
 /**
  * @brief Self test Function for lsm6dsox
  */
@@ -481,6 +513,58 @@ void lsm6dsox_read_data_polling(void)
 }
 
 /**
+ * @brief LSM6DSOX Sensor setup 
+ * 
+ */
+void lsm6dsox_setup()
+{
+  //Configure INT2
+  lsm6dsox_pin_int2_route_t int2_route;
+
+  //Initialize mems driver interface
+  dev_ctx.write_reg = platform_write;
+  dev_ctx.read_reg = platform_read;
+  dev_ctx.mdelay = platform_delay;
+  dev_ctx.handle = &hi2c1;
+
+  /* Wait sensor boot time */
+  platform_delay(BOOT_TIME);
+
+  /* Check device ID. */
+  lsm6dsox_device_id_get(&dev_ctx, &whoamI);
+  if (whoamI != LSM6DSOX_ID)
+  {
+    while (1);
+    //TODO:Implement better handling 
+  }
+
+  /* Restore default configuration. */
+  lsm6dsox_reset_set(&dev_ctx, PROPERTY_ENABLE);
+  do {
+    lsm6dsox_reset_get(&dev_ctx, &rst);
+  } while (rst);
+
+  /* Disable I3C interface. */
+  lsm6dsox_i3c_disable_set(&dev_ctx, LSM6DSOX_I3C_DISABLE);
+  /* Set XL Output Data Rate to 417 Hz. */
+  lsm6dsox_xl_data_rate_set(&dev_ctx, LSM6DSOX_XL_ODR_417Hz);
+  /* Set 2g full XL scale.*/
+  lsm6dsox_xl_full_scale_set(&dev_ctx, LSM6DSOX_2g);
+  /* Set threshold to 60 degrees. */
+  lsm6dsox_6d_threshold_set(&dev_ctx, LSM6DSOX_DEG_60);
+  /* LPF2 on 6D/4D function selection. */
+  lsm6dsox_xl_lp2_on_6d_set(&dev_ctx, PROPERTY_ENABLE);
+
+  /* Uncomment if interrupt generation on Free Fall INT2 pin */
+  lsm6dsox_pin_int2_route_get(&dev_ctx, NULL, &int2_route);
+  int2_route.six_d = PROPERTY_ENABLE;
+  lsm6dsox_pin_int2_route_set(&dev_ctx, NULL, int2_route);
+
+  //sprintf((char *) tx_buffer, "Setup complete!\r\n");//TLIFT
+  //tx_com(tx_buffer, strlen((char const *)tx_buffer));//TLIFT
+}
+
+/**
  * @brief Get orientation using Interrupt 2 
  * 
  */
@@ -540,13 +624,13 @@ void lsm6dsox_orientation(void)
   /* Wait Events. */
   while (1) {
     lsm6dsox_all_sources_t all_source;
-    /* Check if 6D/4D Orientation events. */
+    //Check if 6D/4D Orientation events.
     lsm6dsox_all_sources_get(&dev_ctx, &all_source);
 
     if (all_source.six_d) {
       sprintf((char *)tx_buffer, "6D Or. switched to ");
 
-/*       if (all_source.six_d_xh) {
+      if (all_source.six_d_xh) {
         strcat((char *)tx_buffer, "XH");
       }
 
@@ -560,7 +644,7 @@ void lsm6dsox_orientation(void)
 
       if (all_source.six_d_yl) {
         strcat((char *)tx_buffer, "YL");
-      } */
+      }
 
       if (all_source.six_d_zh) {
         strcat((char *)tx_buffer, "ZH");
